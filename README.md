@@ -69,7 +69,7 @@ ORDER BY sale_id, product_id;
 
 Все неключевые атрибуты должны полностью зависеть от всего составного ключа. В исходной таблице это условие нарушено:
 
-- `sale_date` и `client_id` зависят только от `sale_id`;
+- `sale_date`, `client_id`, `client_name` и `client_city` определяются через `sale_id` (имя и город — через `client_id`);
 - `product_name` и `unit_price` зависят только от `product_id`;
 - `quantity` зависит от всей пары `(sale_id, product_id)`.
 
@@ -91,9 +91,8 @@ ORDER BY sale_id, product_id;
 START TRANSACTION;
 
 UPDATE sales_unnormalized
-SET client_city = 'Тестовый город'
-WHERE client_id = 101
-LIMIT 1;
+SET client_city = 'Сочи'
+WHERE sale_id = 5001 AND product_id = 201;
 
 SELECT sale_id, client_id, client_name, client_city
 FROM sales_unnormalized
@@ -104,33 +103,34 @@ ROLLBACK;
 
 ### Аномалия удаления
 
-Если удалить все товарные позиции единственной продажи клиента 102, из таблицы исчезнут и сведения, по которым можно было узнать имя и город этого клиента.
+В журнале действий удалялись продажи `5004` и `5006`, обе принадлежат клиенту `103`. После удаления всех строк этого клиента его имя и город исчезают из исходной таблицы.
 
 ```sql
 START TRANSACTION;
 
 DELETE FROM sales_unnormalized
-WHERE sale_id IN (
-    SELECT sale_id
-    FROM (
-        SELECT sale_id
-        FROM sales_unnormalized
-        WHERE client_id = 102
-    ) AS client_sales
-);
+WHERE sale_id IN (5004, 5006);
 
 SELECT DISTINCT client_id, client_name, client_city
-FROM sales_unnormalized
-WHERE client_id = 102;
+FROM sales_unnormalized;
 
 ROLLBACK;
 ```
 
+Транзакция отменяет удаление, поэтому исходные данные восстанавливаются.
+
 ### Аномалия вставки
 
-Нельзя добавить клиента или товар как самостоятельную сущность: исходная таблица предназначена для хранения товарных позиций продаж. Для добавления клиента без продажи пришлось бы создавать неполную строку либо использовать фиктивные значения.
+Исходная таблица требует значения для всех полей, включая `sale_id`, `product_id`, дату и количество. Поэтому отдельного клиента без продажи и товарной позиции добавить нельзя.
 
-В нормализованной схеме клиент и товар смогут существовать независимо от продаж.
+В логе зафиксирована попытка:
+
+```sql
+INSERT INTO sales_unnormalized (client_id, client_name, client_city)
+VALUES (104, 'Козлов Дмитрий', 'Екатеринбург');
+```
+
+Она не может выполниться успешно: обязательные поля `sale_id`, `sale_date`, `product_id`, `product_name`, `unit_price` и `quantity` не указаны и не имеют значений по умолчанию. Это и демонстрирует аномалию вставки. В нормализованной схеме такого клиента можно добавить отдельно в таблицу `clients`.
 
 ## 4. Проектирование схемы в 3NF
 
@@ -242,7 +242,7 @@ UNION ALL
 SELECT 'sale_items', COUNT(*) FROM sale_items;
 ```
 
-Ожидаемые значения для предоставленного дампа:
+Расчётные значения по данным исходного SQL-дампа (их следует подтвердить выполнением запроса):
 
 | Таблица | Количество |
 |---|---:|
@@ -270,7 +270,7 @@ JOIN products AS p
     ON p.product_id = si.product_id;
 ```
 
-Для исходного набора данных ожидаемая общая стоимость — **80 000.00**. Значения до и после нормализации должны совпасть.
+По данным SQL-дампов общая стоимость составляет **80 000.00**. Значения до и после нормализации должны совпасть. В предоставленном логе запросы проверки записаны с `COUNT()` без аргумента, поэтому эти две команды не подтверждают результат. Для подсчёта строк используйте `COUNT(*)` согласно синтаксису MySQL: [официальная документация](https://dev.mysql.com/doc/refman/8.0/en/aggregate-functions.html).
 
 ### Сверка строк после переноса
 
@@ -315,72 +315,37 @@ WHERE c.client_id = 101
 GROUP BY c.client_id, c.client_name;
 ```
 
-Ожидаемый результат для клиента 101 — **37 000.00**.
-
-### Дополнительная проверка ссылочной целостности
-
-Попробуем добавить товарную позицию с несуществующим товаром. Запрос должен завершиться ошибкой внешнего ключа:
-
-```sql
-INSERT INTO sale_items (sale_id, product_id, quantity)
-VALUES (5001, 999, 1);
-```
-
-Не добавляйте такую строку в рабочую базу: это отрицательный тест ограничения.
+Расчётный результат для клиента 101 по данным дампа — **37 000.00**.
 
 В ходе зафиксированной сессии после переноса и проверочных запросов исходная таблица `sales_unnormalized` была удалена (команда `DROP TABLE` отражена в логе). Перед таким действием обязательно сохраните исходный дамп. В репозитории он находится в `dumps/before_normalization.sql`.
 
 ## 7. Дампы и журнал действий
 
-В репозитории будут храниться дамп исходного состояния, дамп после нормализации, лог и скриншоты. Дамп, предоставленный для этой работы, относится к базе `sales_norm` и таблице `sales_unnormalized`.
+В репозитории приложены оба SQL-файла:
 
-Пример экспорта из Docker-контейнера (замените имя контейнера и пользователя на свои):
+- [`dumps/before_normalization.sql`](dumps/before_normalization.sql) — исходная таблица `sales_unnormalized` с 10 строками.
+- [`dumps/after_normalization.sql`](dumps/after_normalization.sql) — четыре нормализованные таблицы с перенесёнными данными.
 
-```bash
-mkdir -p dumps logs screenshots
+Журнал действий MySQL за 20.11.2026: [`logs/session.log`](logs/session.log). В нём отражены создание исходной таблицы, демонстрация аномалий, создание и заполнение нормализованных таблиц, проверочные запросы и удаление исходной таблицы.
 
-# Исходное состояние — до создания нормализованных таблиц
-docker exec <container_name> mysqldump -u<mysql_user> -p sales_norm > dumps/before_normalization.sql
-
-# После создания и заполнения нормализованных таблиц
-docker exec <container_name> mysqldump -u<mysql_user> -p sales_norm > dumps/after_normalization.sql
-```
-
-Пароль вводится в ответ на запрос mysqldump. Не записывайте пароль в README, команды лога или репозиторий.
-
-Фактический лог MySQL за сессию 20.11.2026 добавлен в репозиторий: [`logs/session.log`](logs/session.log). В нём сохранены команды создания исходной таблицы, демонстрации аномалий, создания и заполнения нормализованных таблиц, проверок и удаления исходной таблицы.
+**Примечание по проверке:** в логе оба запроса подсчёта содержат `COUNT()` без аргумента. Это ошибка в запросах журнала; корректная форма подсчёта строк — `COUNT(*)`. Поэтому ожидаемые значения в разделе 6 рассчитаны по дампам, но вывод о совпадении результатов нужно подтвердить повторным выполнением исправленных запросов.
 
 ## 8. Материалы выполнения
 
-Добавьте собственные скриншоты в каталог `screenshots/`:
-<img width="1012" height="287" alt="11" src="https://github.com/user-attachments/assets/17159986-089a-4661-8e94-4dcb67a848ed" />
-<img width="222" height="148" alt="22" src="https://github.com/user-attachments/assets/2d41c0d2-f64e-478b-8eed-97854d7e949a" />
-<img width="302" height="197" alt="33" src="https://github.com/user-attachments/assets/add5a513-4fb5-489e-bb4d-6f085d232eca" />
-<img width="311" height="175" alt="44" src="https://github.com/user-attachments/assets/ec206137-5bf7-4b69-b288-ef9598f7095f" />
-<img width="398" height="230" alt="55" src="https://github.com/user-attachments/assets/83d443d7-d844-429f-aaf9-8591e4ebeeba" />
-<img width="391" height="252" alt="66" src="https://github.com/user-attachments/assets/6f7b6d2f-32b9-4189-949c-a1b6aed751b7" />
-<img width="355" height="297" alt="77" src="https://github.com/user-attachments/assets/8879d1ad-4841-4b14-9c93-024d4228c6a3" />
-<img width="407" height="227" alt="88" src="https://github.com/user-attachments/assets/c89574d6-7873-42e6-88f4-829f9e921cd4" />
-<img width="508" height="412" alt="99" src="https://github.com/user-attachments/assets/e1e37c1f-48a1-4744-87f7-a34129b2f8c1" />
-<img width="872" height="257" alt="111" src="https://github.com/user-attachments/assets/dec67d96-5bcf-4774-b004-c6076606de59" />
+Скриншоты выполнения лабораторной работы:
 
-- [ ] Подключение к MySQL в Docker.
-- [ ] Просмотр исходной таблицы `sales_unnormalized`.
-- [ ] Демонстрация аномалий.
-- [ ] Создание таблиц `clients`, `products`, `sales`, `sale_items`.
-- [ ] Перенос данных.
-- [ ] Проверка количества строк.
-- [ ] Сравнение общей стоимости до и после.
-- [ ] Выполнение аналитического запроса.
+<img width="1012" height="287" alt="Скриншот 1" src="https://github.com/user-attachments/assets/17159986-089a-4661-8e94-4dcb67a848ed" />
+<img width="222" height="148" alt="Скриншот 2" src="https://github.com/user-attachments/assets/2d41c0d2-f64e-478b-8eed-97854d7e949a" />
+<img width="302" height="197" alt="Скриншот 3" src="https://github.com/user-attachments/assets/add5a513-4fb5-489e-bb4d-6f085d232eca" />
+<img width="311" height="175" alt="Скриншот 4" src="https://github.com/user-attachments/assets/ec206137-5bf7-4b69-b288-ef9598f7095f" />
+<img width="398" height="230" alt="Скриншот 5" src="https://github.com/user-attachments/assets/83d443d7-d844-429f-aaf9-8591e4ebeeba" />
+<img width="391" height="252" alt="Скриншот 6" src="https://github.com/user-attachments/assets/6f7b6d2f-32b9-4189-949c-a1b6aed751b7" />
+<img width="355" height="297" alt="Скриншот 7" src="https://github.com/user-attachments/assets/8879d1ad-4841-4b14-9c93-024d4228c6a3" />
+<img width="407" height="227" alt="Скриншот 8" src="https://github.com/user-attachments/assets/c89574d6-7873-42e6-88f4-829f9e921cd4" />
+<img width="508" height="412" alt="Скриншот 9" src="https://github.com/user-attachments/assets/e1e37c1f-48a1-4744-87f7-a34129b2f8c1" />
+<img width="872" height="257" alt="Скриншот 10" src="https://github.com/user-attachments/assets/dec67d96-5bcf-4774-b004-c6076606de59" />
 
-Добавьте дампы:
 
-- [ ] `dumps/before_normalization.sql`;
-- [ ] `dumps/after_normalization.sql`.
-
-Добавьте лог:
-
-- [x] [`logs/session.log`](logs/session.log) — предоставленный лог фактической сессии MySQL.
 
 ## 9. Вывод
 
@@ -388,4 +353,4 @@ docker exec <container_name> mysqldump -u<mysql_user> -p sales_norm > dumps/afte
 
 Для устранения этих проблем данные разделяются на четыре связанные таблицы: справочник клиентов, справочник товаров, заголовки продаж и товарные позиции. Корректность переноса проверяется сравнением количества записей, общей стоимости продаж и просмотром объединённых данных.
 
-**Перед сдачей выполните все запросы самостоятельно и приложите реальные скриншоты, дампы и лог. Числовые результаты в README являются ожидаемыми для предоставленного дампа и должны быть подтверждены выполнением SQL.**
+**Итог:** структура разделена на четыре связанные таблицы. Данные дампов дают 10 товарных позиций, 3 клиентов, 5 товаров и 6 продаж; расчётная общая стоимость — 80 000.00, сумма покупок клиента 101 — 37 000.00. Для окончательного подтверждения проверок необходимо повторно выполнить запросы с исправленным `COUNT(*)`, поскольку исходный лог содержит синтаксическую ошибку в подсчёте строк.
