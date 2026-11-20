@@ -353,6 +353,16 @@ docker exec <container_name> mysqldump -u<mysql_user> -p sales_norm > dumps/afte
 ## 8. Материалы выполнения
 
 Добавьте собственные скриншоты в каталог `screenshots/`:
+<img width="1012" height="287" alt="11" src="https://github.com/user-attachments/assets/17159986-089a-4661-8e94-4dcb67a848ed" />
+<img width="222" height="148" alt="22" src="https://github.com/user-attachments/assets/2d41c0d2-f64e-478b-8eed-97854d7e949a" />
+<img width="302" height="197" alt="33" src="https://github.com/user-attachments/assets/add5a513-4fb5-489e-bb4d-6f085d232eca" />
+<img width="311" height="175" alt="44" src="https://github.com/user-attachments/assets/ec206137-5bf7-4b69-b288-ef9598f7095f" />
+<img width="398" height="230" alt="55" src="https://github.com/user-attachments/assets/83d443d7-d844-429f-aaf9-8591e4ebeeba" />
+<img width="391" height="252" alt="66" src="https://github.com/user-attachments/assets/6f7b6d2f-32b9-4189-949c-a1b6aed751b7" />
+<img width="355" height="297" alt="77" src="https://github.com/user-attachments/assets/8879d1ad-4841-4b14-9c93-024d4228c6a3" />
+<img width="407" height="227" alt="88" src="https://github.com/user-attachments/assets/c89574d6-7873-42e6-88f4-829f9e921cd4" />
+<img width="508" height="412" alt="99" src="https://github.com/user-attachments/assets/e1e37c1f-48a1-4744-87f7-a34129b2f8c1" />
+<img width="872" height="257" alt="111" src="https://github.com/user-attachments/assets/dec67d96-5bcf-4774-b004-c6076606de59" />
 
 - [ ] Подключение к MySQL в Docker.
 - [ ] Просмотр исходной таблицы `sales_unnormalized`.
